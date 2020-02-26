@@ -55,24 +55,18 @@ Read(key,masterkey)
 
 ## Benchmarks & lies
 
-Benchmark numbers from macbookpro 2019 (1.4GHz quad-core 8th-gen Intel Core i5 processor, 8GB):
+Benchmark numbers from macbookpro 2019 (1.4GHz quad-core 8th-gen Intel Core i5 processor, 8GB).
 
 ### Reads only
 
 Only reads have been benchmarked. A read/write benchmark would be due to the writes and way locking works with go maps, just add the write time to the read time.
 
-| partitions | keys | reads/sec
-|---|---|---
-| 256 |   1k | 4.28mln
-| 256 |  10k | 4.23mln
-| 256 | 100k | 3.96mln
-
-The initial partitioning slows down reads. A single go map is faster for reading in almost all scenarios. The partitioning however reduces lock contention, this speeding up writes in multiple reader/writer scenarios.
+The initial partitioning (on masterkey) slows down reads. The partitioning is introduced to reduce lock contention, but does not work in the alternative cache package due to the way the single map has to lock, and the lack of a place to embed a lock in a struct.
 The read performance is further dependent on the entries in each map backing the cache. When the data distribution is known to be rather even (Every partition will contain about the same data), an up to x256 times smaller number of entries can be used to initialize (256=max int in 1 byte). This test was done assuming a very asymptotic distribution with entries at 100k (static value). This seems to set the limitation. A test with optimized values for keys and entries, leads to a higer read performance:
 
-| entries | keys | reads/sec
+| entries | keys | ns/read
 |---|---|---
-| 500 | 100k | 11.3mln
+| 1000 | 100k | 108
 
 As usual: Compare this with your favourite caching library/object database/etc to find that that is faster/slower.
 
