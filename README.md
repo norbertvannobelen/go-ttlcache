@@ -26,16 +26,16 @@ For example for an uint32:
 
 ```golang
 type f struct{}
-var bs := make([]byte, 4)
 
 // KeyToByte - Parses specific key as provided by the code to []byte
 func (*f) KeyToByte(key interface{}) []byte {
+    var bs := make([]byte, 4)
     binary.LittleEndian.PutUint32(bs, key.(uint32))
     return bs
 }
 ```
 
-By using a uint32 from the start for the key (in this scenario), the key conversion is optimized in just a few lines. All initialization is done outside of the function thus optimizing garbarge collection. By thinking of what key type to use, this function can be kept extremely fast, which is relevant for overall performance.
+By using a uint32 from the start for the key (in this scenario), the key conversion is optimized in just a few lines. By thinking of what key type to use, this function can be kept extremely fast, which is relevant for overall performance.
 
 ### Store data in the cache
 
