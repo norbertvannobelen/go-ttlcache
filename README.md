@@ -1,20 +1,20 @@
-# ttlcache
+# go-ttlcache
 
-The ttl cache is a cache with a key level time to live (ttl).
+go-ttlcache is a cache with a key level time to live (ttl).
 
-## Why ttlcache
+## Why g0-ttlcache
 
 As part of another, more advanced in memory caching mechanism (under development), an in memory backend cache, was required. No real candidates stood out, so the decision was made to implement a simple ttl based cache.
 
 ## Inner workings
 
-The cache uses 2 maps to process the data, essentially doubling the write ttl, but reducing the read with about 15-20%. Since caches have their main benefits in read oriented loads, the suggested usage (and assumption) is that the cache is used in read oriented situations, thus allowing us to ignore the write load (See alternative cache package in the `alternative` directory for the implementation with a single path).
+The cache uses a map to process the data. The initial map is for a high level key (aka masterKey), the sceond level in the data is an array with 256 entries for data distribution. The 3rd level is a datanode with registered to it the required key functions, size of the current data set, and the data itself.
 
-The cache supports multiple masterkeys with their own configuration and callback functions. All the required memory is initialized on demand, costing a few extra ns per read, but saving on memory in low usage scenarios
+The cache supports multiple masterkeys with their own configuration and callback functions. All the required memory is initialized on demand, creating a stable data access time.
 
 ### Data overflow
 
-The cache is not protected against overflow of data: It does not tell you if requests to write to the cache end in nothing! It also does not stop working for values which fit in the cache. For cache sizing, a statistics function is supplied and will dump information in the log at every ttl expire cleanup.
+The cache is not protected against overflow of data: It does not tell you if write requests to the cache end in nothing! For cache sizing, a statistics function is supplied and will dump information in the log at every ttl expire cleanup.
 
 ## Usage
 
@@ -61,10 +61,14 @@ Benchmark numbers from macbookpro 2019 (1.4GHz quad-core 8th-gen Intel Core i5 p
 
 Only reads have been benchmarked. A read/write benchmark would be due to the writes and way locking works with go maps, just add the write time to the read time.
 
-The initial partitioning (on masterkey) slows down reads. The partitioning is introduced to reduce lock contention, but does not work in the alternative cache package due to the way the single map has to lock, and the lack of a place to embed a lock in a struct.
-The read performance is further dependent on the entries in each map backing the cache. When the data distribution is known to be rather even (Every partition will contain about the same data), an up to x256 times smaller number of entries can be used to initialize (256=max int in 1 byte). This test was done assuming a very asymptotic distribution with entries at 100k (static value). This seems to set the limitation. A test with optimized values for keys and entries, leads to a higer read performance:
+### Performance analysis
 
-| entries | keys | ns/read
+The initial partitioning (on masterkey) slows down reads. Partitioning is introduced to reduce lock contention.
+The read performance is further dependent on the entries in each map backing the cache. When the data distribution is known to be rather even (Every partition will contain about the same data), an up to x256 times smaller number of entries can be used to initialize (256=max int in 1 byte, which is the designed data partitioning). 
+This test was done assuming a very even distribution with of entries with 100k entries total (static value).
+Every change the test was ran and optimizations were made, leading in the current version to:
+
+| max entries | keys | ns/read
 |---|---|---
 | 1000 | 100k | 108
 
