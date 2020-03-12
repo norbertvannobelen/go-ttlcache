@@ -2,7 +2,7 @@
 
 go-ttlcache is a cache with a key level time to live (ttl).
 
-## Why g0-ttlcache
+## Why go-ttlcache
 
 As part of another, more advanced in memory caching mechanism (under development), an in memory backend cache, was required. No real candidates stood out, so the decision was made to implement a simple ttl based cache.
 
