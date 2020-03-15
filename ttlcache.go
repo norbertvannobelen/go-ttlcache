@@ -16,14 +16,14 @@ type ttlFunctions interface {
 
 type ttlManagement struct {
 	sync.RWMutex
-	dataSets map[interface{}]*data
-	keys     int
+	dataSets       map[interface{}]interface{}
+	dataManagement map[interface{}]*data
+	keys           int
 }
 
 type data struct {
 	setTime time.Time
 	ttl     time.Duration
-	data    interface{}
 }
 
 type keySet struct {
@@ -50,7 +50,9 @@ func init() {
 }
 
 // InitCache - Stores config value entries for later use
+// InitCache has to be called for all used masterkeys at the start of the program since the rest of the program has no lock protection on the supposedly initialized slices
 func InitCache(entries int, masterKey string, k ttlFunctions) {
+	mutex.Lock()
 	masterSize[masterKey] = entries
 	m := &mainData{}
 	ttlMem[masterKey] = m
@@ -60,12 +62,13 @@ func InitCache(entries int, masterKey string, k ttlFunctions) {
 	}
 	m.data = md
 	m.functions = k
+	mutex.Unlock()
 }
 
 // Stats - Internal statistics for performance analysis
 func Stats() {
 	for k, v := range ttlMem {
-		log.Printf("Key: %s, partitions %d", k, len(v.data))
+		log.Printf("Master key: %s, partitions %d", k, len(v.data))
 		for i, j := range v.data {
 			log.Printf("Key: %s, partition %d, size %d, registered keys %d", k, i, len(j.dataSets), j.keys)
 		}
@@ -75,25 +78,26 @@ func Stats() {
 // Read - read a key from the cache, exact key expiration
 // With specific locking on the pointer, and with the array of pointers being static (read only after init), this code can be used for parallel reads with minimum blocking
 func Read(key interface{}, masterKey string) (interface{}, error) {
+	// To skip locking here requires essentially all cache masterkeys to be initialized (design trade off)
 	z := ttlMem[masterKey]
 	k := z.functions.KeyToByte(key)
 	if len(k) == 0 {
 		return nil, errKeyNotFound
 	}
-	// With the lock at struct level, we lock only one pointer for the slow operation, so no mutex required here: Gets the read time down with about 2-4ns/read
+	// With the lock at struct level, we lock only one pointer for the read operation, so no mutex required here: Gets the read time down with about 2-4ns/read
+	// Again, all slices need to be initialized to be allowed to lock this late
 	q := z.data[k[0]]
 	q.RLock()
 	// while defer q.RUnlock() is go idiomatic and correct, it is slow: Timing of code using specific unlock at the independent locations improved 15ns per read
+	// We need a copy value of the data so that we can unlock the struct (so some overhead in memory management)
 	v := q.dataSets[key]
 	if v != nil {
-		// Exact expiration adds about 22ns per read
+		// Exact expiration adds about 22ns per read, so not used here (slight reduction off functionality vs arbitrary caching duration)
 		// if time.Since(v.setTime) > v.ttl {
 		// 	return nil, errKeyNotFound
 		// }
-		// We need a copy value of the data so that we can unlock the struct (so some overhead in memory management)
-		retVal := v.data
 		q.RUnlock()
-		return retVal, nil
+		return v, nil
 	}
 	q.RUnlock()
 	return nil, errKeyNotFound
@@ -101,19 +105,19 @@ func Read(key interface{}, masterKey string) (interface{}, error) {
 
 // Write - Write data to the cache
 func Write(key interface{}, value interface{}, ttl time.Duration, masterKey string) {
+	// Requirement: All slices are initialized: No locking required
 	z := ttlMem[masterKey]
-	k := z.functions.KeyToByte(key)
-	q := k[0]
-	// ttlMem and mem are read only after cache initialization. All locked operations are taking place in the array of data structs
-	n := z.data[q] // The given subindex (used to reduce lock contention on write)
+	n := z.data[z.functions.KeyToByte(key)[0]] // The given subindex (used to reduce lock contention on write)
 	// By using n.keys instead of len(n.dataSets), a faster accesspath to statistics is used (impact not tested)
 	// With the lock at struct level, we lock only one pointer for the slow operation
 	n.Lock()
 	if n.keys < masterSize[masterKey] {
 		if n.dataSets == nil {
-			n.dataSets = make(map[interface{}]*data)
+			n.dataSets = make(map[interface{}]interface{})
+			n.dataManagement = make(map[interface{}]*data)
 		}
-		n.dataSets[key] = &data{setTime: time.Now(), ttl: ttl, data: value}
+		n.dataSets[key] = value
+		n.dataManagement[key] = &data{setTime: time.Now(), ttl: ttl}
 		n.keys = n.keys + 1
 	}
 	n.Unlock()
@@ -131,7 +135,7 @@ func expire() {
 			for _, m := range v.data {
 				m.RLock()
 				// Iterate over stored record time
-				for q, t := range m.dataSets {
+				for q, t := range m.dataManagement {
 					// use time.Since since every ttl and setTime can be different
 					if time.Since(t.setTime) > t.ttl {
 						// Map has last been
@@ -146,11 +150,10 @@ func expire() {
 			for _, v := range expiredData {
 				v.m.Lock()
 				delete(v.m.dataSets, v.k3)
+				delete(v.m.dataManagement, v.k3)
 				v.m.keys--
 				v.m.Unlock()
 			}
 		}
-		log.Println("Expiring data")
-		Stats()
 	}
 }

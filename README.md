@@ -66,7 +66,7 @@ The read performance is further dependent on the entries in each map backing the
 
 | entries | keys | ns/read
 |---|---|---
-| 1000 | 100k | 108
+| 1000 | 100k | 92
 
 As usual: Compare this with your favourite caching library/object database/etc to find that that is faster/slower.
 
